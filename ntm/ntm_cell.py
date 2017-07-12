@@ -11,7 +11,7 @@ class NTMCell():
         self.write_head_num = write_head_num
         self.addressing_mode = addressing_mode
         self.reuse = reuse
-        self.controller = tf.nn.rnn_cell.BasicLSTMCell(self.rnn_size)
+        self.controller = tf.nn.rnn_cell.BasicRNNCell(self.rnn_size)
         self.step = 0
 
     def __call__(self, x, prev_state):
@@ -39,7 +39,7 @@ class NTMCell():
                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
             o2p_b = tf.get_variable('o2p_b', [total_parameter_num],
                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
-        parameters = tf.nn.xw_plus_b(controller_output, o2p_w, o2p_b)
+            parameters = tf.nn.xw_plus_b(controller_output, o2p_w, o2p_b)
         head_parameter_list = tf.split(parameters[:, :num_parameters_per_head * num_heads], num_heads, axis=1)
         erase_add_list = tf.split(parameters[:, num_parameters_per_head * num_heads:], 2 * self.write_head_num, axis=1)
 
@@ -56,14 +56,15 @@ class NTMCell():
             # softmax(x)            -> sum_i x_i = 1
             # log(exp(x) + 1) + 1   -> x > 1
 
-            k = head_parameter[:, 0:self.memory_vector_dim]
+            k = tf.tanh(head_parameter[:, 0:self.memory_vector_dim])
             beta = tf.exp(head_parameter[:, self.memory_vector_dim])
             g = tf.sigmoid(head_parameter[:, self.memory_vector_dim + 1])
             s = tf.nn.softmax(
                 head_parameter[:, self.memory_vector_dim + 2:self.memory_vector_dim + 2 + self.memory_size]
             )
             gamma = tf.log(tf.exp(head_parameter[:, -1]) + 1) + 1
-            w = self.addressing(k, beta, g, s, gamma, prev_M, prev_w_list[i])     # Figure 2
+            with tf.variable_scope('addressing_head_%d' % i):
+                w = self.addressing(k, beta, g, s, gamma, prev_M, prev_w_list[i])     # Figure 2
             w_list.append(w)
 
         # Reading (Sec 3.1)
@@ -80,8 +81,8 @@ class NTMCell():
         M = prev_M
         for i in range(self.write_head_num):
             w = tf.expand_dims(write_w_list[i], axis=2)
-            erase_vector = tf.expand_dims(erase_add_list[i * 2], axis=1)
-            add_vector = tf.expand_dims(erase_add_list[i * 2 + 1], axis=1)
+            erase_vector = tf.expand_dims(tf.sigmoid(erase_add_list[i * 2]), axis=1)
+            add_vector = tf.expand_dims(tf.tanh(erase_add_list[i * 2 + 1]), axis=1)
             M = M * (tf.ones(M.get_shape()) - tf.matmul(w, erase_vector)) + tf.matmul(w, add_vector)
 
         # controller_output -> NTM output
@@ -91,7 +92,7 @@ class NTMCell():
                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
             o2o_b = tf.get_variable('o2o_b', [x.get_shape()[1]],
                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
-        NTM_output = tf.nn.xw_plus_b(controller_output, o2o_w, o2o_b)
+            NTM_output = tf.nn.xw_plus_b(controller_output, o2o_w, o2o_b)
 
         state = {
             'controller_state': controller_state,
@@ -128,24 +129,43 @@ class NTMCell():
 
         g = tf.expand_dims(g, axis=1)
         w_g = g * w_c + (1 - g) * prev_w                                        # eq (7)
-        t = tf.concat([tf.reverse(s, axis=[1])] * 2, axis=1)
+
+        t = tf.concat([tf.reverse(s, axis=[1]), tf.reverse(s, axis=[1])], axis=1)
         s_matrix = tf.stack(
             [t[:, self.memory_size - i - 1:self.memory_size * 2 - i - 1] for i in range(self.memory_size)],
             axis=1
         )
-        w_ = tf.reduce_sum(tf.expand_dims(w_g, axis=1) * s_matrix, axis=1)      # eq (8)
+        w_ = tf.reduce_sum(tf.expand_dims(w_g, axis=1) * s_matrix, axis=2)      # eq (8)
         w_sharpen = tf.pow(w_, tf.expand_dims(gamma, axis=1))
         w = w_sharpen / tf.reduce_sum(w_sharpen, axis=1, keep_dims=True)        # eq (9)
 
         return w
 
     def zero_state(self, batch_size, dtype):
-        state = {
-            'controller_state': self.controller.zero_state(batch_size, dtype),
-            'read_vector_list': [tf.zeros([batch_size, self.memory_vector_dim])
-                                 for _ in range(self.read_head_num)],
-            'w_list': [tf.zeros([batch_size, self.memory_size])
-                       for _ in range(self.read_head_num + self.write_head_num)],
-            'M': tf.zeros([batch_size, self.memory_size, self.memory_vector_dim])
-        }
-        return state
+        def expand(x, dim, N):
+            return tf.concat([tf.expand_dims(x, dim) for _ in range(N)], axis=dim)
+
+        with tf.variable_scope('init', reuse=self.reuse):
+            state = {
+                # 'controller_state': self.controller.zero_state(batch_size, dtype),
+                # 'read_vector_list': [tf.zeros([batch_size, self.memory_vector_dim])
+                #                      for _ in range(self.read_head_num)],
+                # 'w_list': [tf.zeros([batch_size, self.memory_size])
+                #            for _ in range(self.read_head_num + self.write_head_num)],
+                # 'M': tf.zeros([batch_size, self.memory_size, self.memory_vector_dim])
+                'controller_state': expand(tf.get_variable('init_state', self.rnn_size,
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075)),
+                                  dim=0, N=batch_size),
+                'read_vector_list': [expand(tf.nn.softmax(tf.get_variable('init_r_%d' % i, [self.memory_vector_dim],
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075))),
+                                  dim=0, N=batch_size)
+                           for i in range(self.read_head_num)],
+                'w_list': [expand(tf.nn.softmax(tf.get_variable('init_w_%d' % i, [self.memory_size],
+                                                initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075))),
+                                  dim=0, N=batch_size)
+                           for i in range(self.read_head_num + self.write_head_num)],
+                'M': expand(tf.tanh(tf.get_variable('init_M', [self.memory_size, self.memory_vector_dim],
+                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075))),
+                            dim=0, N=batch_size)
+            }
+            return state
