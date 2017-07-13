@@ -1,13 +1,16 @@
 import tensorflow as tf
 import numpy as np
 import argparse
-from model import NTM_model
+from model import NTMCopyModel
 from utils import generate_random_strings
 import matplotlib.pyplot as plt
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', default="train")
+    parser.add_argument('--restore_training', default=False)
+    parser.add_argument('--test_seq_length', type=int, default=20)
     parser.add_argument('--model', default="NTM")
     parser.add_argument('--rnn_size', default=64)
     parser.add_argument('--rnn_num_layers', default=3)
@@ -16,19 +19,30 @@ def main():
     parser.add_argument('--memory_vector_dim', default=4)
     parser.add_argument('--batch_size', default=10)
     parser.add_argument('--vector_dim', default=4)
-    parser.add_argument('--num_epoches', default=100000)
-    parser.add_argument('--learning_rate', default=0.0001)
+    parser.add_argument('--num_epoches', default=1000000)
+    parser.add_argument('--learning_rate', default=1e-4)
+    parser.add_argument('--save_dir', default='./save/model.tfmodel')
     args = parser.parse_args()
-    train(args)
+    if args.mode == 'train':
+        train(args)
+    elif args.mode == 'test':
+        test(args)
+
 
 def train(args):
-    model_list = [NTM_model(args, 1)]
+    model_list = [NTMCopyModel(args, 1)]
     for seq_length in range(2, args.max_seq_length + 1):
-        model_list.append(NTM_model(args, seq_length, reuse=True))
+        model_list.append(NTMCopyModel(args, seq_length, reuse=True))
     # model = NTM_model(args, args.max_seq_length)
     with tf.Session() as sess:
+        if args.restore_training:
+            saver = tf.train.Saver()
+            ckpt = tf.train.get_checkpoint_state('./save')
+            saver.restore(sess, ckpt.model_checkpoint_path)
+        else:
+            saver = tf.train.Saver(tf.global_variables())
+            tf.global_variables_initializer().run()
         train_writer = tf.summary.FileWriter('./summary/train', sess.graph)
-        tf.global_variables_initializer().run()
         plt.ion()
         plt.show()
         for b in range(args.num_epoches):
@@ -56,6 +70,28 @@ def train(args):
                 print('batches %d, loss %g' % (b, copy_loss))
             else:                   # train
                 sess.run(model.train_op, feed_dict=feed_dict)
+            if b % 5000 == 0 and b > 0:
+                saver.save(sess, args.save_dir, global_step=b)
+
+
+def test(args):
+    model = NTMCopyModel(args, args.test_seq_length)
+    saver = tf.train.Saver()
+    ckpt = tf.train.get_checkpoint_state('save')
+    with tf.Session() as sess:
+        saver.restore(sess, ckpt.model_checkpoint_path)
+        x = generate_random_strings(args.batch_size, args.test_seq_length, args.vector_dim)
+        feed_dict = {model.x: x}
+        output, copy_loss, state_list = sess.run([model.o, model.copy_loss, model.state_list], feed_dict=feed_dict)
+        for p in range(args.batch_size):
+            print(x[p, :, :])
+            print(output[p, :, :])
+            print('copy_loss: %g' % copy_loss)
+        w_plot = []
+        for state in state_list:
+            w_plot.append(np.concatenate([state['w_list'][0][p, :], state['w_list'][1][p, :]]))
+        plt.imshow(w_plot, interpolation='nearest', cmap='gray')
+        plt.show()
 
 if __name__ == '__main__':
     main()

@@ -3,7 +3,7 @@ import numpy as np
 
 class NTMCell():
     def __init__(self, rnn_size, memory_size, memory_vector_dim, read_head_num, write_head_num,
-                 addressing_mode='content_and_loaction', reuse=False):
+                 addressing_mode='content_and_loaction', reuse=False, output_dim=None):
         self.rnn_size = rnn_size
         self.memory_size = memory_size
         self.memory_vector_dim = memory_vector_dim
@@ -13,6 +13,7 @@ class NTMCell():
         self.reuse = reuse
         self.controller = tf.nn.rnn_cell.BasicRNNCell(self.rnn_size)
         self.step = 0
+        self.output_dim = output_dim
 
     def __call__(self, x, prev_state):
         prev_read_vector_list = prev_state['read_vector_list']      # read vector in Sec 3.1 (the content that is
@@ -87,10 +88,14 @@ class NTMCell():
 
         # controller_output -> NTM output
 
+        if not self.output_dim:
+            output_dim = x.get_shape()[1]
+        else:
+            output_dim = self.output_dim
         with tf.variable_scope("o2o", reuse=(self.step > 0) or self.reuse):
-            o2o_w = tf.get_variable('o2o_w', [controller_output.get_shape()[1], x.get_shape()[1]],
+            o2o_w = tf.get_variable('o2o_w', [controller_output.get_shape()[1], output_dim],
                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
-            o2o_b = tf.get_variable('o2o_b', [x.get_shape()[1]],
+            o2o_b = tf.get_variable('o2o_b', [output_dim],
                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
             NTM_output = tf.nn.xw_plus_b(controller_output, o2o_w, o2o_b)
 
@@ -153,19 +158,21 @@ class NTMCell():
                 # 'w_list': [tf.zeros([batch_size, self.memory_size])
                 #            for _ in range(self.read_head_num + self.write_head_num)],
                 # 'M': tf.zeros([batch_size, self.memory_size, self.memory_vector_dim])
-                'controller_state': expand(tf.get_variable('init_state', self.rnn_size,
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075)),
+                'controller_state': expand(tf.tanh(tf.get_variable('init_state', self.rnn_size,
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))),
                                   dim=0, N=batch_size),
                 'read_vector_list': [expand(tf.nn.softmax(tf.get_variable('init_r_%d' % i, [self.memory_vector_dim],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075))),
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))),
                                   dim=0, N=batch_size)
                            for i in range(self.read_head_num)],
                 'w_list': [expand(tf.nn.softmax(tf.get_variable('init_w_%d' % i, [self.memory_size],
-                                                initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075))),
-                                  dim=0, N=batch_size)
-                           for i in range(self.read_head_num + self.write_head_num)],
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))),
+                                  dim=0, N=batch_size) if self.addressing_mode == 'content_and_loaction'
+                           else tf.zeros([batch_size, self.memory_size])
+                           for i in range(self.read_head_num + self.write_head_num)]
+                         ,
                 'M': expand(tf.tanh(tf.get_variable('init_M', [self.memory_size, self.memory_vector_dim],
-                                     initializer=tf.random_normal_initializer(mean=0.0, stddev=0.0075))),
-                            dim=0, N=batch_size)
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))),
+                                  dim=0, N=batch_size)
             }
             return state
