@@ -3,14 +3,14 @@ import tensorflow as tf
 import numpy as np
 import argparse
 from model import NTMOneShotLearningModel
+from tensorflow.python import debug as tf_debug
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', default="train")
     parser.add_argument('--restore_training', default=False)
-    parser.add_argument('--test_seq_length', type=int, default=20)
-    parser.add_argument('--model', default="LSTM")
+    parser.add_argument('--model', default="NTM")
     parser.add_argument('--rnn_size', default=64)
     parser.add_argument('--image_width', default=20)
     parser.add_argument('--image_height', default=20)
@@ -20,7 +20,6 @@ def main():
     parser.add_argument('--memory_size', default=20)
     parser.add_argument('--memory_vector_dim', default=10)
     parser.add_argument('--batch_size', default=10)
-    parser.add_argument('--vector_dim', default=4)
     parser.add_argument('--num_epoches', default=1000000)
     parser.add_argument('--learning_rate', default=0.0001)
     parser.add_argument('--save_dir', default='./save/one_shot_learning')
@@ -35,6 +34,8 @@ def train(args):
     model = NTMOneShotLearningModel(args)
     data_loader = OmniglotDataLoader(image_size=(args.image_width, args.image_height))
     with tf.Session() as sess:
+        # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+        # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
         if args.restore_training:
             saver = tf.train.Saver()
             ckpt = tf.train.get_checkpoint_state(args.save_dir)
@@ -49,6 +50,8 @@ def train(args):
             if b % 100 == 0:        # test
                 learning_loss = sess.run(model.learning_loss, feed_dict=feed_dict)
                 merged_summary = sess.run(model.learning_loss_summary, feed_dict=feed_dict)
+                state_list = sess.run(model.state_list, feed_dict=feed_dict)
+                print(state_list)
                 train_writer.add_summary(merged_summary, b)
                 print('batches %d, loss %g' % (b, learning_loss))
             else:                   # train

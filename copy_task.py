@@ -14,14 +14,15 @@ def main():
     parser.add_argument('--model', default="NTM")
     parser.add_argument('--rnn_size', default=64)
     parser.add_argument('--rnn_num_layers', default=3)
-    parser.add_argument('--max_seq_length', default=10)
-    parser.add_argument('--memory_size', default=20)
-    parser.add_argument('--memory_vector_dim', default=4)
+    parser.add_argument('--max_seq_length', default=20)
+    parser.add_argument('--memory_size', default=128)
+    parser.add_argument('--memory_vector_dim', default=20)
     parser.add_argument('--batch_size', default=10)
-    parser.add_argument('--vector_dim', default=4)
+    parser.add_argument('--vector_dim', default=8)
     parser.add_argument('--num_epoches', default=1000000)
     parser.add_argument('--learning_rate', default=1e-4)
-    parser.add_argument('--save_dir', default='./save/model.tfmodel')
+    parser.add_argument('--save_dir', default='./save/copy_task')
+    parser.add_argument('--tensorboard_dir', default='./summary/copy_task')
     args = parser.parse_args()
     if args.mode == 'train':
         train(args)
@@ -37,12 +38,12 @@ def train(args):
     with tf.Session() as sess:
         if args.restore_training:
             saver = tf.train.Saver()
-            ckpt = tf.train.get_checkpoint_state('./save')
+            ckpt = tf.train.get_checkpoint_state(args.save_dir)
             saver.restore(sess, ckpt.model_checkpoint_path)
         else:
             saver = tf.train.Saver(tf.global_variables())
             tf.global_variables_initializer().run()
-        train_writer = tf.summary.FileWriter('./summary/train', sess.graph)
+        train_writer = tf.summary.FileWriter(args.tensorboard_dir, sess.graph)
         plt.ion()
         plt.show()
         for b in range(args.num_epoches):
@@ -71,13 +72,13 @@ def train(args):
             else:                   # train
                 sess.run(model.train_op, feed_dict=feed_dict)
             if b % 5000 == 0 and b > 0:
-                saver.save(sess, args.save_dir, global_step=b)
+                saver.save(sess, args.save_dir + '/model.tfmodel', global_step=b)
 
 
 def test(args):
     model = NTMCopyModel(args, args.test_seq_length)
     saver = tf.train.Saver()
-    ckpt = tf.train.get_checkpoint_state('save')
+    ckpt = tf.train.get_checkpoint_state(args.save_dir)
     with tf.Session() as sess:
         saver.restore(sess, ckpt.model_checkpoint_path)
         x = generate_random_strings(args.batch_size, args.test_seq_length, args.vector_dim)
