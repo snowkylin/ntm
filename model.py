@@ -69,7 +69,7 @@ class NTMOneShotLearningModel():
         elif args.model == 'NTM':
             import ntm.ntm_cell as ntm_cell
             cell = ntm_cell.NTMCell(args.rnn_size, args.memory_size, args.memory_vector_dim, 1, 1,
-                                    addressing_mode='content',
+                                    addressing_mode='content_and_location',
                                     output_dim=args.n_classes)
 
         state = cell.zero_state(args.batch_size, tf.float32)

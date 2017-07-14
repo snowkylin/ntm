@@ -7,13 +7,17 @@ def generate_random_strings(batch_size, seq_length, vector_dim):
     return np.random.randint(0, 2, size=[batch_size, seq_length, vector_dim]).astype(np.float32)
 
 
-def one_hot(x, dim):
+def one_hot_encode(x, dim):
     res = np.zeros(np.shape(x) + (dim, ), dtype=np.float32)
     it = np.nditer(x, flags=['multi_index'])
     while not it.finished:
         res[it.multi_index][it[0]] = 1
         it.iternext()
     return res
+
+
+def one_hot_decode(x):
+    return np.argmax(x, axis=-1)
 
 
 class OmniglotDataLoader:
@@ -28,22 +32,21 @@ class OmniglotDataLoader:
                         )
                         for filename in filelist]
                 )
-        self.n_classes = len(self.data)
         self.train_data = self.data[:n_train_classses]
         self.test_data = self.data[-n_test_classes:]
 
     def fetch_batch(self, n_classes, batch_size, seq_length, type='train'):
         if type == 'train':
             data = self.train_data
-        else:
+        elif type == 'test':
             data = self.test_data
         seq = np.random.randint(0, n_classes, [batch_size, seq_length])
-        classes = [np.random.choice(range(self.n_classes), replace=False, size=n_classes) for _ in range(batch_size)]
+        classes = [np.random.choice(range(len(data)), replace=False, size=n_classes) for _ in range(batch_size)]
         seq_pic = [[data[classes[i][j]][np.random.randint(0, len(data[classes[i][j]]))]
                    for j in seq[i, :]]
                    for i in range(batch_size)]
-        seq_one_hot = one_hot(seq, n_classes)
+        seq_one_hot = one_hot_encode(seq, n_classes)
         seq_one_hot_shifted = np.concatenate(
-            [np.zeros(shape=[batch_size, 1, n_classes]), seq_one_hot[:, 1:, :]], axis=1
+            [np.zeros(shape=[batch_size, 1, n_classes]), seq_one_hot[:, :-1, :]], axis=1
         )
         return seq_pic, seq_one_hot_shifted, seq_one_hot

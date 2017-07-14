@@ -12,7 +12,12 @@ Tensorflow implementation of Neural Turing Machines, as well as its application 
 
 ### Copy task
 
+Vector of weighting (left: read vector; right: write vector; shift range: 1)
+
 ![](images/copy_task_head.png)
+
+Training loss:
+
 ![](images/copy_task_loss.png)
 
 ## One-shot Learning Using NTM
