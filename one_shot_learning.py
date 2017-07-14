@@ -11,24 +11,24 @@ def main():
     parser.add_argument('--mode', default="train")
     parser.add_argument('--restore_training', default=False)
     parser.add_argument('--model', default="NTM")
-    parser.add_argument('--rnn_size', default=64)
+    parser.add_argument('--rnn_size', default=128)
     parser.add_argument('--image_width', default=20)
     parser.add_argument('--image_height', default=20)
     parser.add_argument('--rnn_num_layers', default=3)
     parser.add_argument('--n_classes', default=5)
-    parser.add_argument('--seq_length', default=25)
-    parser.add_argument('--memory_size', default=20)
-    parser.add_argument('--memory_vector_dim', default=10)
+    parser.add_argument('--seq_length', default=50)
+    parser.add_argument('--memory_size', default=128)
+    parser.add_argument('--memory_vector_dim', default=20)
     parser.add_argument('--batch_size', default=10)
-    parser.add_argument('--num_epoches', default=1000000)
+    parser.add_argument('--num_epoches', default=100000)
     parser.add_argument('--learning_rate', default=0.0001)
     parser.add_argument('--save_dir', default='./save/one_shot_learning')
     parser.add_argument('--tensorboard_dir', default='./summary/one_shot_learning')
     args = parser.parse_args()
     if args.mode == 'train':
         train(args)
-    # elif args.mode == 'test':
-    #     test(args)
+    elif args.mode == 'test':
+        test(args)
 
 def train(args):
     model = NTMOneShotLearningModel(args)
@@ -58,6 +58,9 @@ def train(args):
                 sess.run(model.train_op, feed_dict=feed_dict)
             if b % 5000 == 0 and b > 0:
                 saver.save(sess, args.save_dir + '/model.tfmodel', global_step=b)
+
+def test(args):
+    
 
 if __name__ == '__main__':
     main()

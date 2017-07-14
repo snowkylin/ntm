@@ -3,7 +3,7 @@ import numpy as np
 
 class NTMCell():
     def __init__(self, rnn_size, memory_size, memory_vector_dim, read_head_num, write_head_num,
-                 addressing_mode='content_and_loaction', reuse=False, output_dim=None):
+                 addressing_mode='content_and_loaction', shift_range=1, reuse=False, output_dim=None):
         self.rnn_size = rnn_size
         self.memory_size = memory_size
         self.memory_vector_dim = memory_vector_dim
@@ -14,6 +14,7 @@ class NTMCell():
         self.controller = tf.nn.rnn_cell.BasicRNNCell(self.rnn_size)
         self.step = 0
         self.output_dim = output_dim
+        self.shift_range = shift_range
 
     def __call__(self, x, prev_state):
         prev_read_vector_list = prev_state['read_vector_list']      # read vector in Sec 3.1 (the content that is
@@ -28,11 +29,12 @@ class NTMCell():
         # controller_output     -> k (dim = memory_vector_dim, compared to each vector in M, Sec 3.1)
         #                       -> beta (positive scalar, key strength, Sec 3.1)                -> w^c
         #                       -> g (scalar in (0, 1), blend between w_prev and w^c, Sec 3.2)  -> w^g
-        #                       -> s (dim = memory_size, shift weighting, Sec 3.2)              -> w^~
+        #                       -> s (dim = shift_range * 2 + 1, shift weighting, Sec 3.2)      -> w^~
+        #                            (not memory_size, that's too wide)
         #                       -> gamma (scalar (>= 1), sharpen the final result, Sec 3.2)     -> w    * num_heads
         # controller_output     -> erase, add vector (dim = memory_vector_dim, \in (0, 1), Sec 3.2)     * write_head_num
 
-        num_parameters_per_head = self.memory_vector_dim + 1 + 1 + self.memory_size + 1
+        num_parameters_per_head = self.memory_vector_dim + 1 + 1 + (self.shift_range * 2 + 1) + 1
         num_heads = self.read_head_num + self.write_head_num
         total_parameter_num = num_parameters_per_head * num_heads + self.memory_vector_dim * 2 * self.write_head_num
         with tf.variable_scope("o2p", reuse=(self.step > 0) or self.reuse):
@@ -62,7 +64,7 @@ class NTMCell():
             beta = tf.sigmoid(head_parameter[:, self.memory_vector_dim]) * 10        # do not use exp, it will explode!
             g = tf.sigmoid(head_parameter[:, self.memory_vector_dim + 1])
             s = tf.nn.softmax(
-                head_parameter[:, self.memory_vector_dim + 2:self.memory_vector_dim + 2 + self.memory_size]
+                head_parameter[:, self.memory_vector_dim + 2:self.memory_vector_dim + 2 + (self.shift_range * 2 + 1)]
             )
             gamma = tf.log(tf.exp(head_parameter[:, -1]) + 1) + 1
             with tf.variable_scope('addressing_head_%d' % i):
@@ -138,6 +140,9 @@ class NTMCell():
         g = tf.expand_dims(g, axis=1)
         w_g = g * w_c + (1 - g) * prev_w                                        # eq (7)
 
+        s = tf.concat([s[:, :self.shift_range + 1],
+                       tf.zeros([s.get_shape()[0], self.memory_size - (self.shift_range * 2 + 1)]),
+                       s[:, -self.shift_range:]], axis=1)
         t = tf.concat([tf.reverse(s, axis=[1]), tf.reverse(s, axis=[1])], axis=1)
         s_matrix = tf.stack(
             [t[:, self.memory_size - i - 1:self.memory_size * 2 - i - 1] for i in range(self.memory_size)],
@@ -172,8 +177,7 @@ class NTMCell():
                                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
                                   dim=0, N=batch_size) if self.addressing_mode == 'content_and_loaction'
                            else tf.zeros([batch_size, self.memory_size])
-                           for i in range(self.read_head_num + self.write_head_num)]
-                         ,
+                           for i in range(self.read_head_num + self.write_head_num)],
                 'M': expand(tf.tanh(tf.get_variable('init_M', [self.memory_size, self.memory_vector_dim],
                                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
                                   dim=0, N=batch_size)
