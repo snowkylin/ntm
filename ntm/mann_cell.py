@@ -1,20 +1,18 @@
 import tensorflow as tf
 import numpy as np
 
-class NTMCell():
+class MANNCell():
     def __init__(self, rnn_size, memory_size, memory_vector_dim, read_head_num, write_head_num,
-                 addressing_mode='content_and_loaction', shift_range=1, reuse=False, output_dim=None):
+                 reuse=False, output_dim=None):
         self.rnn_size = rnn_size
         self.memory_size = memory_size
         self.memory_vector_dim = memory_vector_dim
         self.read_head_num = read_head_num
         self.write_head_num = write_head_num
-        self.addressing_mode = addressing_mode
         self.reuse = reuse
         self.controller = tf.nn.rnn_cell.BasicRNNCell(self.rnn_size)
         self.step = 0
         self.output_dim = output_dim
-        self.shift_range = shift_range
 
     def __call__(self, x, prev_state):
         prev_read_vector_list = prev_state['read_vector_list']      # read vector in Sec 3.1 (the content that is
@@ -26,13 +24,7 @@ class NTMCell():
         with tf.variable_scope('controller', reuse=self.reuse):
             controller_output, controller_state = self.controller(controller_input, prev_controller_state)
 
-        # controller_output     -> k (dim = memory_vector_dim, compared to each vector in M, Sec 3.1)
-        #                       -> beta (positive scalar, key strength, Sec 3.1)                -> w^c
-        #                       -> g (scalar in (0, 1), blend between w_prev and w^c, Sec 3.2)  -> w^g
-        #                       -> s (dim = shift_range * 2 + 1, shift weighting, Sec 3.2)      -> w^~
-        #                            (not memory_size, that's too wide)
-        #                       -> gamma (scalar (>= 1), sharpen the final result, Sec 3.2)     -> w    * num_heads
-        # controller_output     -> erase, add vector (dim = memory_vector_dim, \in (0, 1), Sec 3.2)     * write_head_num
+        # controller_output     -> k (dim = memory_vector_dim, compared to each vector in M)
 
         num_parameters_per_head = self.memory_vector_dim + 1 + 1 + (self.shift_range * 2 + 1) + 1
         num_heads = self.read_head_num + self.write_head_num

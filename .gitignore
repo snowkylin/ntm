@@ -1,4 +1,9 @@
 .idea
 *.pyc
 paper
+summary
+save
+data/*
 __pycache__
+data/
+playground.py
