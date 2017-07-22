@@ -12,7 +12,7 @@ def main():
     parser.add_argument('--restore_training', default=False)
     parser.add_argument('--test_seq_length', type=int, default=20)
     parser.add_argument('--model', default="NTM")
-    parser.add_argument('--rnn_size', default=64)
+    parser.add_argument('--rnn_size', default=128)
     parser.add_argument('--rnn_num_layers', default=3)
     parser.add_argument('--max_seq_length', default=15)
     parser.add_argument('--memory_size', default=128)
@@ -39,7 +39,7 @@ def train(args):
     with tf.Session() as sess:
         if args.restore_training:
             saver = tf.train.Saver()
-            ckpt = tf.train.get_checkpoint_state(args.save_dir)
+            ckpt = tf.train.get_checkpoint_state(args.save_dir + '/' + args.model)
             saver.restore(sess, ckpt.model_checkpoint_path)
         else:
             saver = tf.train.Saver(tf.global_variables())
@@ -59,13 +59,14 @@ def train(args):
                 print(x[p, :, :])
                 print(sess.run(model.o, feed_dict=feed_dict)[p, :, :])
                 state_list = sess.run(model.state_list, feed_dict=feed_dict)
-                w_plot = []
-                M_plot = np.concatenate([state['M'][p, :, :] for state in state_list])
-                for state in state_list:
-                    w_plot.append(np.concatenate([state['w_list'][0][p, :], state['w_list'][1][p, :]]))
-                plt.imshow(w_plot, interpolation='nearest', cmap='gray')
-                plt.draw()
-                plt.pause(0.001)
+                if args.model == 'NTM':
+                    w_plot = []
+                    M_plot = np.concatenate([state['M'][p, :, :] for state in state_list])
+                    for state in state_list:
+                        w_plot.append(np.concatenate([state['w_list'][0][p, :], state['w_list'][1][p, :]]))
+                    plt.imshow(w_plot, interpolation='nearest', cmap='gray')
+                    plt.draw()
+                    plt.pause(0.001)
                 copy_loss = sess.run(model.copy_loss, feed_dict=feed_dict)
                 merged_summary = sess.run(model.copy_loss_summary, feed_dict=feed_dict)
                 train_writer.add_summary(merged_summary, b)
@@ -73,7 +74,7 @@ def train(args):
             else:                   # train
                 sess.run(model.train_op, feed_dict=feed_dict)
             if b % 5000 == 0 and b > 0:
-                saver.save(sess, args.save_dir + '/model.tfmodel', global_step=b)
+                saver.save(sess, args.save_dir + '/' + args.model + '/model.tfmodel', global_step=b)
 
 
 def test(args):
@@ -88,12 +89,13 @@ def test(args):
         for p in range(args.batch_size):
             print(x[p, :, :])
             print(output[p, :, :])
-            print('copy_loss: %g' % copy_loss)
-        w_plot = []
-        for state in state_list:
-            w_plot.append(np.concatenate([state['w_list'][0][p, :], state['w_list'][1][p, :]]))
-        plt.imshow(w_plot, interpolation='nearest', cmap='gray')
-        plt.show()
+        print('copy_loss: %g' % copy_loss)
+        if args.model == 'NTM':
+            w_plot = []
+            for state in state_list:
+                w_plot.append(np.concatenate([state['w_list'][0][p, :], state['w_list'][1][p, :]]))
+            plt.imshow(w_plot, interpolation='nearest', cmap='gray')
+            plt.show()
 
 if __name__ == '__main__':
     main()

@@ -9,22 +9,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', default="train")
     parser.add_argument('--restore_training', default=False)
-    parser.add_argument('--model', default="LSTM")
-    parser.add_argument('--rnn_size', default=128)
+    parser.add_argument('--model', default="MANN")
+    parser.add_argument('--rnn_size', default=200)
     parser.add_argument('--image_width', default=20)
     parser.add_argument('--image_height', default=20)
-    parser.add_argument('--rnn_num_layers', default=3)
+    parser.add_argument('--rnn_num_layers', default=1)
     parser.add_argument('--n_classes', default=5)
     parser.add_argument('--seq_length', default=50)
     parser.add_argument('--memory_size', default=128)
-    parser.add_argument('--memory_vector_dim', default=20)
-    parser.add_argument('--shift_range', default=5)
-    parser.add_argument('--read_head_num', default=1)
-    parser.add_argument('--write_head_num', default=1)
-    parser.add_argument('--batch_size', default=10)
+    parser.add_argument('--memory_vector_dim', default=40)
+    parser.add_argument('--shift_range', default=1, help='Only for model=NTM')
+    parser.add_argument('--read_head_num', default=4)
+    parser.add_argument('--write_head_num', default=1, help='Only for model=NTM. For MANN #(write_head) = #(read_head)')
+    parser.add_argument('--batch_size', default=16)
     parser.add_argument('--test_batch_num', default=10)
     parser.add_argument('--num_epoches', default=100000)
-    parser.add_argument('--learning_rate', default=0.0001)
+    parser.add_argument('--n_train_classes', default=1200)
+    parser.add_argument('--n_test_classes', default=423)
+    parser.add_argument('--learning_rate', default=1e-4)
     parser.add_argument('--save_dir', default='./save/one_shot_learning')
     parser.add_argument('--tensorboard_dir', default='./summary/one_shot_learning')
     args = parser.parse_args()
@@ -33,9 +35,14 @@ def main():
     elif args.mode == 'test':
         test(args)
 
+
 def train(args):
     model = NTMOneShotLearningModel(args)
-    data_loader = OmniglotDataLoader(image_size=(args.image_width, args.image_height))
+    data_loader = OmniglotDataLoader(
+        image_size=(args.image_width, args.image_height),
+        n_train_classses=args.n_train_classes,
+        n_test_classes=args.n_test_classes
+    )
     with tf.Session() as sess:
         # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
         # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
@@ -51,20 +58,43 @@ def train(args):
             x_image, x_label, y = data_loader.fetch_batch(args.n_classes, args.batch_size, args.seq_length)
             feed_dict = {model.x_image: x_image, model.x_label: x_label, model.y: y}
             if b % 100 == 0:        # test
-                learning_loss = sess.run(model.learning_loss, feed_dict=feed_dict)
+                correct = [0] * args.seq_length
+                total = [0] * args.seq_length
+                output, learning_loss = sess.run([model.o, model.learning_loss], feed_dict=feed_dict)
                 merged_summary = sess.run(model.learning_loss_summary, feed_dict=feed_dict)
-                state_list = sess.run(model.state_list, feed_dict=feed_dict)
-                print(state_list)
+                # state_list = sess.run(model.state_list, feed_dict=feed_dict)
+                # print(state_list)
+                for i in range(args.batch_size):
+                    y_i = one_hot_decode(y)[i]
+                    output_i = one_hot_decode(output)[i]
+                    # print(output)
+                    # print(y_i)
+                    # print(output_i)
+                    class_count = [0] * args.n_classes
+                    for j in range(args.seq_length):
+                        class_count[y_i[j]] += 1
+                        total[class_count[y_i[j]]] += 1
+                        if y_i[j] == output_i[j]:
+                            correct[class_count[y_i[j]]] += 1
                 train_writer.add_summary(merged_summary, b)
-                print('batches %d, loss %g' % (b, learning_loss))
+                accuracy = [float(correct[i]) / total[i] if total[i] > 0. else 0. for i in range(1, 11)]
+                for accu in accuracy:
+                    print('%.4f' % accu, end='\t')
+                print('')
+                print('batches %d, loss %.4f' % (b, learning_loss))
             else:                   # train
-                sess.run(model.train_op, feed_dict=feed_dict)
+                state = sess.run(model.train_op, feed_dict=feed_dict)
             if b % 5000 == 0 and b > 0:
                 saver.save(sess, args.save_dir + '/' + args.model + '/model.tfmodel', global_step=b)
 
+
 def test(args):
     model = NTMOneShotLearningModel(args)
-    data_loader = OmniglotDataLoader(image_size=(args.image_width, args.image_height))
+    data_loader = OmniglotDataLoader(
+        image_size=(args.image_width, args.image_height),
+        n_train_classses=args.n_train_classes,
+        n_test_classes=args.n_test_classes
+    )
     saver = tf.train.Saver()
     ckpt = tf.train.get_checkpoint_state(args.save_dir + '/' + args.model)
     with tf.Session() as sess:

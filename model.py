@@ -15,7 +15,7 @@ class NTMCopyModel():
             # single_cell = tf.nn.rnn_cell.BasicLSTMCell(args.rnn_size)
             # cannot use [single_cell] * 3 in tensorflow 1.2
             def rnn_cell(rnn_size):
-                return tf.nn.rnn_cell.BasicLSTMCell(rnn_size)
+                return tf.nn.rnn_cell.BasicLSTMCell(rnn_size, reuse=reuse)
             cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(args.rnn_size) for _ in range(args.rnn_num_layers)])
         elif args.model == 'NTM':
             import ntm.ntm_cell as ntm_cell
@@ -68,8 +68,15 @@ class NTMOneShotLearningModel():
             cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(args.rnn_size) for _ in range(args.rnn_num_layers)])
         elif args.model == 'NTM':
             import ntm.ntm_cell as ntm_cell
-            cell = ntm_cell.NTMCell(args.rnn_size, args.memory_size, args.memory_vector_dim, 1, 1,
+            cell = ntm_cell.NTMCell(args.rnn_size, args.memory_size, args.memory_vector_dim,
+                                    read_head_num=args.read_head_num,
+                                    write_head_num=args.write_head_num,
                                     addressing_mode='content_and_location',
+                                    output_dim=args.n_classes)
+        elif args.model == 'MANN':
+            import ntm.mann_cell as mann_cell
+            cell = mann_cell.MANNCell(args.rnn_size, args.memory_size, args.memory_vector_dim,
+                                    head_num=args.read_head_num,
                                     output_dim=args.n_classes)
 
         state = cell.zero_state(args.batch_size, tf.float32)
@@ -77,12 +84,13 @@ class NTMOneShotLearningModel():
         self.o = []
         for t in range(args.seq_length):
             output, state = cell(tf.concat([self.x_image[:, t, :], self.x_label[:, t, :]], axis=1), state)
+            # output, state = cell(self.y[:, t, :], state)
             if args.model == 'LSTM':
                 with tf.variable_scope("o2o", reuse=(t > 0)):
                     o2o_w = tf.get_variable('o2o_w', [output.get_shape()[1], args.n_classes],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
                     o2o_b = tf.get_variable('o2o_b', [args.n_classes],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.075))
+                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
                     output = tf.nn.xw_plus_b(output, o2o_w, o2o_b)
             output = tf.nn.softmax(output, dim=1)
             self.o.append(output)
@@ -97,7 +105,10 @@ class NTMOneShotLearningModel():
         self.learning_loss_summary = tf.summary.scalar('learning_loss', self.learning_loss)
 
         with tf.variable_scope('optimizer'):
-            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=args.learning_rate, momentum=0.9, decay=0.95)
-            gvs = self.optimizer.compute_gradients(self.learning_loss)
-            capped_gvs = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gvs]
-            self.train_op = self.optimizer.apply_gradients(capped_gvs)
+            self.optimizer = tf.train.RMSPropOptimizer(
+                learning_rate=args.learning_rate, momentum=0.9, decay=0.95
+            )
+            # gvs = self.optimizer.compute_gradients(self.learning_loss)
+            # capped_gvs = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gvs]
+            # self.train_op = self.optimizer.apply_gradients(gvs)
+            self.train_op = self.optimizer.minimize(self.learning_loss)
