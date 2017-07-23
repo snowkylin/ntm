@@ -24,6 +24,17 @@ def one_hot_decode(x):
     return np.argmax(x, axis=-1)
 
 
+def five_hot_decode(x):
+    x = np.reshape(x, newshape=np.shape(x)[:-1] + (5, 5))
+    def f(a):
+        return sum([a[i] * 5 ** i for i in range(5)])
+    return np.apply_along_axis(f, -1, np.argmax(x, axis=-1))
+
+
+def baseN(num,b):
+    return ((num == 0) and  "0" ) or ( baseN(num // b, b).lstrip("0") + "0123456789abcdefghijklmnopqrstuvwxyz"[num % b])
+
+
 class OmniglotDataLoader:
     def __init__(self, data_dir='./data', image_size=(20, 20), n_train_classses=1200, n_test_classes=423):
         self.data = []
@@ -43,7 +54,11 @@ class OmniglotDataLoader:
         self.train_data = self.data[:n_train_classses]
         self.test_data = self.data[-n_test_classes:]
 
-    def fetch_batch(self, n_classes, batch_size, seq_length, type='train', sample_strategy='random', augment=True):
+    def fetch_batch(self, n_classes, batch_size, seq_length,
+                    type='train',
+                    sample_strategy='random',
+                    augment=True,
+                    label_type='one_hot'):
         if type == 'train':
             data = self.train_data
         elif type == 'test':
@@ -62,11 +77,21 @@ class OmniglotDataLoader:
                                  only_resize=not augment)
                    for j in seq[i, :]]
                    for i in range(batch_size)]
-        seq_one_hot = one_hot_encode(seq, n_classes)
-        seq_one_hot_shifted = np.concatenate(
-            [np.zeros(shape=[batch_size, 1, n_classes]), seq_one_hot[:, :-1, :]], axis=1
-        )
-        return seq_pic, seq_one_hot_shifted, seq_one_hot
+        if label_type == 'one_hot':
+            seq_encoded = one_hot_encode(seq, n_classes)
+            seq_encoded_shifted = np.concatenate(
+                [np.zeros(shape=[batch_size, 1, n_classes]), seq_encoded[:, :-1, :]], axis=1
+            )
+        elif label_type == 'five_hot':
+            label_dict = [[[int(j) for j in list(baseN(i, 5)) + [0] * (5 - len(baseN(i, 5)))]
+                      for i in np.random.choice(range(5 ** 5), replace=False, size=n_classes)]
+                     for _ in range(batch_size)]
+            seq_encoded_ = np.array([[label_dict[b][i] for i in seq[b]] for b in range(batch_size)])
+            seq_encoded = np.reshape(one_hot_encode(seq_encoded_, dim=5), newshape=[batch_size, seq_length, -1])
+            seq_encoded_shifted = np.concatenate(
+                [np.zeros(shape=[batch_size, 1, 25]), seq_encoded[:, :-1, :]], axis=1
+            )
+        return seq_pic, seq_encoded_shifted, seq_encoded
 
     def rand_rotate_init(self, n_classes, batch_size):
         self.rand_rotate_map = np.random.randint(0, 4, [batch_size, n_classes])
