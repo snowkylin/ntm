@@ -7,3 +7,5 @@ data/*
 __pycache__
 data/
 playground.py
+result
+state*

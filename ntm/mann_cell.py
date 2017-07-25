@@ -2,8 +2,8 @@ import tensorflow as tf
 import numpy as np
 
 class MANNCell():
-    def __init__(self, rnn_size, memory_size, memory_vector_dim, head_num, gamma=0.99,
-                 reuse=False, output_dim=None, usage_strategy='summary'):
+    def __init__(self, rnn_size, memory_size, memory_vector_dim, head_num, gamma=0.95,
+                 reuse=False, output_dim=None, usage_strategy='summary', k_strategy='separate'):
         self.rnn_size = rnn_size
         self.memory_size = memory_size
         self.memory_vector_dim = memory_vector_dim
@@ -14,6 +14,7 @@ class MANNCell():
         self.output_dim = output_dim
         self.gamma = gamma
         self.usage_strategy = usage_strategy
+        self.k_strategy = k_strategy
 
     def __call__(self, x, prev_state):
         prev_read_vector_list = prev_state['read_vector_list']      # read vector (the content that is
@@ -29,13 +30,18 @@ class MANNCell():
         # controller_output     -> k (dim = memory_vector_dim, compared to each vector in M)
         #                       -> alpha (scalar, combination of w_r and w_lu)
 
-        num_parameters_per_head = self.memory_vector_dim + 1
+        if self.k_strategy == 'summary':
+            num_parameters_per_head = self.memory_vector_dim + 1
+        elif self.k_strategy == 'separate':
+            num_parameters_per_head = self.memory_vector_dim * 2 + 1
         total_parameter_num = num_parameters_per_head * self.head_num
         with tf.variable_scope("o2p", reuse=(self.step > 0) or self.reuse):
             o2p_w = tf.get_variable('o2p_w', [controller_output.get_shape()[1], total_parameter_num],
-                                    initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+                                    initializer=tf.random_uniform_initializer(minval=-0.1, maxval=0.1))
+                                    # initializer=tf.random_normal_initializer(mean=0.0, stddev=0.1))
             o2p_b = tf.get_variable('o2p_b', [total_parameter_num],
-                                    initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+                                    initializer=tf.random_uniform_initializer(minval=-0.1, maxval=0.1))
+                                    # initializer=tf.random_normal_initializer(mean=0.0, stddev=0.1))
             parameters = tf.nn.xw_plus_b(controller_output, o2p_w, o2p_b)
         head_parameter_list = tf.split(parameters, self.head_num, axis=1)
 
@@ -47,18 +53,21 @@ class MANNCell():
         prev_w_u_list = prev_state['w_u_list']      # usage weight (usage_strategy = 'seperate')
         prev_M = prev_state['M']
         prev_w_u = prev_state['w_u_summary']        # usage weight (usage_strategy = 'summary')
-        prev_w_lu = prev_state['w_lu_summary']      # least-used weight (usage_strategy = 'summary')
+        if self.usage_strategy == 'summary':
+            prev_sorted_w_u, prev_indices, prev_w_lu = self.least_used(prev_w_u)
         w_r_list = []
         w_w_list = []
         w_u_list = []
         w_lu_list = []
         w_u_summary = None
-        w_lu_summary = None
         k_list = []
+        a_list = []
         p_list = []
         for i, head_parameter in enumerate(head_parameter_list):
             with tf.variable_scope('addressing_head_%d' % i):
                 k = tf.tanh(head_parameter[:, 0:self.memory_vector_dim], name='k')
+                if self.k_strategy == 'separate':
+                    a = tf.tanh(head_parameter[:, self.memory_vector_dim:self.memory_vector_dim * 2], name='a')
                 sig_alpha = tf.sigmoid(head_parameter[:, -1:], name='sig_alpha')
                 w_r = self.read_head_addressing(k, prev_M)
                 if self.usage_strategy == 'separate':
@@ -73,56 +82,70 @@ class MANNCell():
                 w_u_list.append(w_u)
                 w_lu_list.append(w_lu)
             k_list.append(k)
-            p_list.append({'k': k, 'sig_alpha': sig_alpha})
+            if self.k_strategy == 'separate':
+                a_list.append(a)
+            p_list.append({'k': k, 'sig_alpha': sig_alpha, 'a': a})
 
         if self.usage_strategy == 'summary':
             w_u_summary = self.gamma * prev_w_u + tf.add_n(w_r_list) + tf.add_n(w_w_list)
-            w_lu_summary = self.least_used(w_u_summary)
+
+        # Set least used memory location computed from w_(t-1)^u to zero
+
+        M_ = prev_M * tf.expand_dims(1. - tf.one_hot(prev_indices[:, -1], self.memory_size), dim=2)
+
+        # Writing
+
+        M = M_
+        with tf.variable_scope('writing'):
+            for i in range(self.head_num):
+                w = tf.expand_dims(w_w_list[i], axis=2)
+                if self.k_strategy == 'summary':
+                    k = tf.expand_dims(k_list[i], axis=1)
+                elif self.k_strategy == 'separate':
+                    k = tf.expand_dims(a_list[i], axis=1)
+                M = M + tf.matmul(w, k)
 
         # Reading
 
         read_vector_list = []
         with tf.variable_scope('reading'):
             for i in range(self.head_num):
-                read_vector = tf.reduce_sum(tf.expand_dims(w_r_list[i], dim=2) * prev_M, axis=1)
+                read_vector = tf.reduce_sum(tf.expand_dims(w_r_list[i], dim=2) * M, axis=1)
                 read_vector_list.append(read_vector)
-
-        # Writing
-
-        M = prev_M
-        with tf.variable_scope('writing'):
-            for i in range(self.head_num):
-                w = tf.expand_dims(w_w_list[i], axis=2)
-                k = tf.expand_dims(k_list[i], axis=1)
-                M = M + tf.matmul(w, k)
 
         # controller_output -> NTM output
 
-        if not self.output_dim:
-            output_dim = x.get_shape()[1]
-        else:
-            output_dim = self.output_dim
-        with tf.variable_scope("o2o", reuse=(self.step > 0) or self.reuse):
-            o2o_w = tf.get_variable('o2o_w', [controller_output.get_shape()[1], output_dim],
-                                    initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
-            o2o_b = tf.get_variable('o2o_b', [output_dim],
-                                    initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
-            NTM_output = tf.nn.xw_plus_b(controller_output, o2o_w, o2o_b)
+        # if not self.output_dim:
+        #     output_dim = x.get_shape()[1]
+        # else:
+        #     output_dim = self.output_dim
+        # with tf.variable_scope("o2o", reuse=(self.step > 0) or self.reuse):
+        #     o2o_w = tf.get_variable('o2o_w', [controller_output.get_shape()[1], output_dim],
+        #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        #     o2o_b = tf.get_variable('o2o_b', [output_dim],
+        #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        #     NTM_output = tf.nn.xw_plus_b(controller_output, o2o_w, o2o_b)
+        NTM_output = controller_output
 
         state = {
             'controller_state': controller_state,
+            'controller_output': controller_output,
             'read_vector_list': read_vector_list,
             'w_r_list': w_r_list,
+            'w_w_list': w_w_list,
             'w_u_list': w_u_list,
             'w_lu_list': w_lu_list,
             'w_u_summary': w_u_summary,
-            'w_lu_summary': w_lu_summary,
             'p_list': p_list,
-            'M': M
+            'M_': M_,
+            'M': M,
+            'o2p_w': o2p_w,
+            'o2p_b': o2p_b,
+            'prev_w_lu': prev_w_lu
         }
 
         self.step += 1
-        return NTM_output, state
+        return tf.concat([NTM_output] + read_vector_list, axis=1), state
 
     def read_head_addressing(self, k, prev_M):
         with tf.variable_scope('read_head_addressing'):
@@ -148,17 +171,20 @@ class MANNCell():
 
             # Write to (1) the place that was read in t-1 (2) the place that was least used in t-1
 
-            return sig_alpha * prev_w_r + (1 - sig_alpha) * prev_w_lu               # eq (22)
+            return sig_alpha * prev_w_r + (1. - sig_alpha) * prev_w_lu              # eq (22)
 
     def least_used(self, w_u):
-        _, indices = tf.nn.top_k(w_u, k=self.memory_size)
-        indices = indices[:, -self.head_num:]
-        w_lu = tf.reduce_sum(tf.one_hot(indices, depth=self.memory_size), axis=1)
-        return w_lu
+        sorted_w_u, indices = tf.nn.top_k(w_u, k=self.memory_size)
+        w_lu = tf.reduce_sum(tf.one_hot(indices[:, -self.head_num:], depth=self.memory_size), axis=1)
+        return sorted_w_u, indices, w_lu
 
     def zero_state(self, batch_size, dtype):
         def expand(x, dim, N):
             return tf.concat([tf.expand_dims(x, dim) for _ in range(N)], axis=dim)
+
+        one_hot_weight_vector = np.zeros([batch_size, self.memory_size])
+        one_hot_weight_vector[..., 0] = 1
+        one_hot_weight_vector = tf.constant(one_hot_weight_vector, dtype=tf.float32)
 
         with tf.variable_scope('init', reuse=self.reuse):
             state = {
@@ -166,14 +192,17 @@ class MANNCell():
                 #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
                 #                   dim=0, N=batch_size),
                 'controller_state': self.controller.zero_state(batch_size, dtype),
-                'read_vector_list': [expand(tf.nn.softmax(tf.get_variable('init_r_%d' % i, [self.memory_vector_dim],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
-                                  dim=0, N=batch_size)
-                           for i in range(self.head_num)],
-                'w_r_list': [expand(tf.nn.softmax(tf.get_variable('init_w_r_%d' % i, [self.memory_size],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
-                                  dim=0, N=batch_size)
-                           for i in range(self.head_num)],
+                # 'read_vector_list': [expand(tf.nn.softmax(tf.get_variable('init_r_%d' % i, [self.memory_vector_dim],
+                #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
+                #                   dim=0, N=batch_size)
+                #            for i in range(self.head_num)],
+                'read_vector_list': [tf.zeros([batch_size, self.memory_vector_dim])
+                                     for _ in range(self.head_num)],
+                # 'w_r_list': [expand(tf.nn.softmax(tf.get_variable('init_w_r_%d' % i, [self.memory_size],
+                #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
+                #                   dim=0, N=batch_size)
+                #            for i in range(self.head_num)],
+                'w_r_list': [one_hot_weight_vector for _ in range(self.head_num)],
                 # 'w_u_list': [expand(tf.nn.softmax(tf.get_variable('init_w_u_%d' % i, [self.memory_size],
                 #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
                 #                   dim=0, N=batch_size)
@@ -184,10 +213,13 @@ class MANNCell():
                 #                   dim=0, N=batch_size)
                 #            for i in range(self.head_num)],
                 'w_lu_list': [tf.zeros([batch_size, self.memory_size]) for i in range(self.head_num)],
-                'w_u_summary': tf.zeros([batch_size, self.memory_size]),
-                'w_lu_summary': tf.zeros([batch_size, self.memory_size]),
-                'M': expand(tf.tanh(tf.get_variable('init_M', [self.memory_size, self.memory_vector_dim],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
-                                  dim=0, N=batch_size)
+                # 'w_u_summary': expand(tf.nn.softmax(tf.get_variable('init_w_u_summary', [self.memory_size],
+                #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
+                #                   dim=0, N=batch_size),
+                'w_u_summary': one_hot_weight_vector,
+                # 'M': expand(tf.tanh(tf.get_variable('init_M', [self.memory_size, self.memory_vector_dim],
+                #                             initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))),
+                #                   dim=0, N=batch_size)
+                'M': tf.constant(np.ones([batch_size, self.memory_size, self.memory_vector_dim]) * 1e-6, dtype=tf.float32)
             }
             return state

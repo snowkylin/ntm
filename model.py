@@ -83,6 +83,11 @@ class NTMOneShotLearningModel():
             cell = mann_cell.MANNCell(args.rnn_size, args.memory_size, args.memory_vector_dim,
                                     head_num=args.read_head_num,
                                     output_dim=args.output_dim)
+        elif args.model == 'MANN2':
+            import ntm.mann_cell_2 as mann_cell
+            cell = mann_cell.MANNCell(args.rnn_size, args.memory_size, args.memory_vector_dim,
+                                    head_num=args.read_head_num,
+                                    output_dim=args.output_dim)
 
         state = cell.zero_state(args.batch_size, tf.float32)
         self.state_list = [state]
@@ -90,13 +95,14 @@ class NTMOneShotLearningModel():
         for t in range(args.seq_length):
             output, state = cell(tf.concat([self.x_image[:, t, :], self.x_label[:, t, :]], axis=1), state)
             # output, state = cell(self.y[:, t, :], state)
-            if args.model == 'LSTM':
-                with tf.variable_scope("o2o", reuse=(t > 0)):
-                    o2o_w = tf.get_variable('o2o_w', [output.get_shape()[1], args.output_dim],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
-                    o2o_b = tf.get_variable('o2o_b', [args.output_dim],
-                                            initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
-                    output = tf.nn.xw_plus_b(output, o2o_w, o2o_b)
+            with tf.variable_scope("o2o", reuse=(t > 0)):
+                o2o_w = tf.get_variable('o2o_w', [output.get_shape()[1], args.output_dim],
+                                        initializer=tf.random_uniform_initializer(minval=-0.1, maxval=0.1))
+                                        # initializer=tf.random_normal_initializer(mean=0.0, stddev=0.1))
+                o2o_b = tf.get_variable('o2o_b', [args.output_dim],
+                                        initializer=tf.random_uniform_initializer(minval=-0.1, maxval=0.1))
+                                        # initializer=tf.random_normal_initializer(mean=0.0, stddev=0.1))
+                output = tf.nn.xw_plus_b(output, o2o_w, o2o_b)
             if args.label_type == 'one_hot':
                 output = tf.nn.softmax(output, dim=1)
             elif args.label_type == 'five_hot':
@@ -119,9 +125,10 @@ class NTMOneShotLearningModel():
         self.learning_loss_summary = tf.summary.scalar('learning_loss', self.learning_loss)
 
         with tf.variable_scope('optimizer'):
-            self.optimizer = tf.train.RMSPropOptimizer(
-                learning_rate=args.learning_rate, momentum=0.9, decay=0.95
-            )
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
+            # self.optimizer = tf.train.RMSPropOptimizer(
+            #     learning_rate=args.learning_rate, momentum=0.9, decay=0.95
+            # )
             # gvs = self.optimizer.compute_gradients(self.learning_loss)
             # capped_gvs = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gvs]
             # self.train_op = self.optimizer.apply_gradients(gvs)
