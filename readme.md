@@ -1,6 +1,10 @@
-# Neural Turing Machines
+# NTM and MANN in TensorFlow
 
-Tensorflow implementation of Neural Turing Machines (NTM), as well as its application on one-shot learning (MANN).
+TensorFlow implementation of Neural Turing Machines (NTM), as well as its application on one-shot learning (MANN). 
+
+The models are ready to use -- they are encapsulated into classes `NTMCell` and `MANNCell`, and the usage is similar to `LSTMCell` in TensorFlow, so you can apply these models easily in other programs. The sample code is also provided.
+
+You can see [my slide](https://docs.google.com/presentation/d/1VLBkDQn5926qh1hu8to1mYxE777EqttZcx_Z_XApwe8/edit?usp=sharing) for more details about NTM and MANN.
 
 ## Prerequisites
 
@@ -91,7 +95,7 @@ for t in range(seq_length):
     output_list.append(output)
 ```
 
-There is another implementation of `MANNCell` translated from tristandeleu's Theano version of MANN. You can find it in `ntm/mann_cell_2.py` and the usage is just the same. The performance is not fully tested but it seems to work fine too.
+There is another implementation of `MANNCell` translated from [tristandeleu's Theano version of MANN](https://github.com/tristandeleu/ntm-one-shot). You can find it in `ntm/mann_cell_2.py` and the usage is just the same. The performance is not fully tested but it seems to work fine too.
 
 #### Train and Test
 
@@ -118,6 +122,8 @@ Omniglot Classification:
 ![](images/LSTM_one_hot.png) | ![](images/MANN_one_hot.png)
 ---|---
 LSTM, five random classes/episode, one-hot vector labels | MANN, five random classes/episode, one-hot vector labels
+![](images/LSTM_five_hot.png) | ![](images/MANN_five_hot.png)
+LSTM, fifteen random classes/episode, five-character string labels | MANN, fifteen random classes/episode, five-character string labels
 
 Test-set classification accuracies for LSTM and MANN trained on the Omniglot dataset, using one-hot encodings of labels and five classes presented per episode:
 
@@ -125,12 +131,3 @@ Model | 1st | 2nd | 3rd | 4th | 5th | 6th | 7th | 8th | 9th | 10th | loss
 ---|---|---|---|---|---|---|---|---|---|---|---
 LSTM | 0.2333 | 0.5897 | 0.6581 | 0.681 | 0.7077 | 0.7156 | 0.7141 | 0.7305 | 0.7281 | 0.7233 | 42.6427
 MANN | 0.3558 | 0.8881 | 0.9497 | 0.9651 | 0.9734 | 0.9744 | 0.9794 | 0.9798 | 0.978 | 0.9755 | 11.531
-
-
-## Roadmap
-
-* Implement Neural Turing Machines (NTM) (Reference: [link](https://arxiv.org/abs/1410.5401))
-* Apply NTM to one-shot learning (Reference: [link](https://arxiv.org/abs/1605.06065))
-* Implement Differentiable Neural Computer (DNC) based on NTM (Reference: [link](https://www.nature.com/nature/journal/v538/n7626/abs/nature20101.html))
-* Apply DNC to one-shot learning
-* Other improvements (during the whole progress)

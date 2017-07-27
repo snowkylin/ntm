@@ -73,9 +73,9 @@ def train(args):
                 output, learning_loss = sess.run([model.o, model.learning_loss], feed_dict=feed_dict)
                 merged_summary = sess.run(model.learning_loss_summary, feed_dict=feed_dict)
                 train_writer.add_summary(merged_summary, b)
-                state_list = sess.run(model.state_list, feed_dict=feed_dict)
-                with open('state_long.txt', 'w') as f:
-                    print(state_list, file=f)
+                # state_list = sess.run(model.state_list, feed_dict=feed_dict)  # For debugging
+                # with open('state_long.txt', 'w') as f:
+                #     print(state_list, file=f)
                 accuracy = test_f(args, y, output)
                 for accu in accuracy:
                     print('%.4f' % accu, end='\t')

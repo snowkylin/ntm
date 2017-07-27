@@ -2,18 +2,14 @@ import tensorflow as tf
 import numpy as np
 
 class MANNCell():
-    def __init__(self, rnn_size, memory_size, memory_vector_dim, head_num, gamma=0.95,
-                 reuse=False, output_dim=None, usage_strategy='summary', k_strategy='separate'):
+    def __init__(self, rnn_size, memory_size, memory_vector_dim, head_num, gamma=0.95, k_strategy='separate'):
         self.rnn_size = rnn_size
         self.memory_size = memory_size
         self.memory_vector_dim = memory_vector_dim
         self.head_num = head_num                                    # #(read head) == #(write head)
-        self.reuse = reuse
         self.controller = tf.nn.rnn_cell.BasicLSTMCell(self.rnn_size)
         self.step = 0
-        self.output_dim = output_dim
         self.gamma = gamma
-        self.usage_strategy = usage_strategy
         self.k_strategy = k_strategy
 
         self.W_key = tf.Variable(
