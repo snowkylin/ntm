@@ -4,7 +4,7 @@ TensorFlow implementation of Neural Turing Machines (NTM), as well as its applic
 
 The models are ready to use -- they are encapsulated into classes `NTMCell` and `MANNCell`, and the usage is similar to `LSTMCell` in TensorFlow, so you can apply these models easily in other programs. The sample code is also provided.
 
-You can see [my slide](https://docs.google.com/presentation/d/1VLBkDQn5926qh1hu8to1mYxE777EqttZcx_Z_XApwe8/edit?usp=sharing) for more details about NTM and MANN.
+You can see [my slide](https://docs.google.com/presentation/d/1FqU7q-vWN9uV7sMRt9It9F_el9nIdqzBfMPm91hJ4B0/edit?usp=sharing) for more details about NTM and MANN.
 
 ## Prerequisites
 
