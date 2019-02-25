@@ -99,7 +99,20 @@ There is another implementation of `MANNCell` translated from [tristandeleu's Th
 
 #### Train and Test
 
-To train the model, run:
+To train the model, first you need to prepare the Omniglot dataset. Download [images_background.zip](https://github.com/brendenlake/omniglot/blob/master/python/images_background.zip) (964 classes) and [images_evaluation.zip](https://github.com/brendenlake/omniglot/blob/master/python/images_evaluation.zip) (679 classes), then combine them in a new `data` folder so you have 1623 classes. Your `data` folder may looks like:
+
+    /data
+        /Alphabet_of_the_Magi
+            /character01
+                0709_01.png
+                ...
+                0709_20.png
+            ...
+            /character20
+        ...
+        /ULOG
+
+Then, run:
 
 ```
 python one_shot_learning.py
@@ -113,7 +126,7 @@ To test the model, run:
 python one_shot_learning.py --mode test
 ```
 
-You can specify testing options via flags such as `--test_batch_num`.
+You can specify testing options via flags such as `--test_batch_num` (default: 100), `--n_train_classes` (default: 1200) and `--n_test_classes` (default: 423).
 
 ### Result
 
