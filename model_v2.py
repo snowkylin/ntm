@@ -1,32 +1,47 @@
 import tensorflow as tf
-import numpy as np
 
 
-class NTMCopyModel(tf.keras.Model):
+class CopyModel(tf.keras.Model):
     def __init__(self, batch_size, vector_dim, model_type, cell_params):
         super().__init__()
-        eof = np.zeros([batch_size, vector_dim + 1])
-        eof[:, vector_dim] = np.ones([batch_size])
-        eof = tf.constant(eof, dtype=tf.float32)
-        zero = tf.constant(np.zeros([batch_size, vector_dim + 1]), dtype=tf.float32)
+        self.batch_size = batch_size
+        self.vector_dim = vector_dim
+
+        self.eof = tf.one_hot([self.vector_dim] * batch_size, depth=self.vector_dim+1)
+        self.zero = tf.zeros([batch_size, vector_dim + 1], dtype=tf.float32)
 
         if model_type == 'LSTM':
             self.cell = tf.keras.layers.StackedRNNCells(
                 [tf.keras.layers.LSTMCell(units=cell_params['rnn_size']) for _ in range(cell_params['rnn_num_layers'])])
         elif model_type == 'NTM':
-            import ntm.ntm_cell_v2 as ntm_cell
-            self.cell = ntm_cell.NTMCell(rnn_size=cell_params['rnn_size'],
-                                         memory_size=cell_params['memory_size'],
-                                         memory_vector_dim=cell_params['memory_vector_dim'],
-                                         read_head_num=1,
-                                         write_head_num=1,
-                                         addressing_mode='content_and_location',
-                                         output_dim=vector_dim)
+            from ntm.ntm_cell_v2 import NTMCell
+            self.cell = NTMCell(rnn_size=cell_params['rnn_size'],
+                                memory_size=cell_params['memory_size'],
+                                memory_vector_dim=cell_params['memory_vector_dim'],
+                                read_head_num=cell_params['read_head_num'],
+                                write_head_num=cell_params['write_head_num'],
+                                addressing_mode='content_and_location',
+                                output_dim=vector_dim)
         else:
             raise ValueError('Model type not supported')
 
-        state = self.cell.get_initial_state(batch_size=batch_size, dtype=tf.float32)
-
-
+    @tf.function
     def call(self, inputs):
+        x, seq_length = inputs
+
+        x_list = tf.TensorArray(dtype=tf.float32, size=seq_length)
+        x_list.unstack(tf.transpose(x, perm=[1, 0, 2]))
+        state = self.cell.get_initial_state(batch_size=self.batch_size, dtype=tf.float32)
+        for t in range(seq_length):
+            output, state = self.cell(tf.concat([x_list.read(t), tf.zeros([self.batch_size, 1])], axis=1), state)
+
+        output, state = self.cell(self.eof, state)
+
+        output_list = tf.TensorArray(dtype=tf.float32, size=seq_length)
+        for t in range(seq_length):
+            output, state = self.cell(self.zero, state)
+            output_list = output_list.write(t, output[:, 0:self.vector_dim])
+        output_list = tf.sigmoid(tf.transpose(output_list.stack(), perm=[1, 0, 2]))
+
+        return output_list
 

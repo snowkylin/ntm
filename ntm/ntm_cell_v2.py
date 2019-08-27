@@ -36,6 +36,24 @@ class NTMCell(tf.keras.layers.AbstractRNNCell):
         # From controller output to NTM output:
         self.controller_output_to_ntm_output = tf.keras.layers.Dense(units=self.output_dim, use_bias=True)
 
+        self.init_memory_state = self.add_variable(name='init_memory_state',
+                                                   shape=[self.rnn_size],
+                                                   initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_carry_state = self.add_variable(name='init_carry_state',
+                                                  shape=[self.rnn_size],
+                                                  initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_r = [self.add_variable(name='init_r_%d' % i,
+                                         shape=[self.memory_vector_dim],
+                                         initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+                       for i in range(self.read_head_num)]
+        self.init_w = [self.add_variable(name='init_w_%d' % i,
+                                         shape=[self.memory_size],
+                                         initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+                       for i in range(self.read_head_num + self.write_head_num)]
+        self.init_M = self.add_variable(name='init_M',
+                                        shape=[self.memory_size, self.memory_vector_dim],
+                                        initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+
     @property
     def state_size(self):
         return self.rnn_size
@@ -83,7 +101,7 @@ class NTMCell(tf.keras.layers.AbstractRNNCell):
         read_w_list = w_list[:self.read_head_num]
         read_vector_list = []
         for i in range(self.read_head_num):
-            read_vector = tf.reduce_sum(tf.expand_dims(read_w_list[i], dim=2) * prev_M, axis=1)
+            read_vector = tf.reduce_sum(tf.expand_dims(read_w_list[i], axis=2) * prev_M, axis=1)
             read_vector_list.append(read_vector)
 
         # Writing (Sec 3.2)
@@ -101,7 +119,7 @@ class NTMCell(tf.keras.layers.AbstractRNNCell):
             'controller_state': controller_state,
             'read_vector_list': read_vector_list,
             'w_list': w_list,
-            'p_list': p_list,
+            # 'p_list': p_list,
             'M': M
         }
         return ntm_output, state
@@ -111,14 +129,14 @@ class NTMCell(tf.keras.layers.AbstractRNNCell):
         # Cosine Similarity
         k = tf.expand_dims(k, axis=2)
         inner_product = tf.matmul(prev_M, k)
-        k_norm = tf.sqrt(tf.reduce_sum(tf.square(k), axis=1, keep_dims=True))
-        M_norm = tf.sqrt(tf.reduce_sum(tf.square(prev_M), axis=2, keep_dims=True))
+        k_norm = tf.sqrt(tf.reduce_sum(tf.square(k), axis=1, keepdims=True))
+        M_norm = tf.sqrt(tf.reduce_sum(tf.square(prev_M), axis=2, keepdims=True))
         norm_product = M_norm * k_norm
         K = tf.squeeze(inner_product / (norm_product + 1e-8))                   # eq (6)
 
         # Calculating w^c
         K_amplified = tf.exp(tf.expand_dims(beta, axis=1) * K)
-        w_c = K_amplified / tf.reduce_sum(K_amplified, axis=1, keep_dims=True)  # eq (5)
+        w_c = K_amplified / tf.reduce_sum(K_amplified, axis=1, keepdims=True)   # eq (5)
 
         if self.addressing_mode == 'content':                                   # Only focus on content
             return w_c
@@ -137,17 +155,22 @@ class NTMCell(tf.keras.layers.AbstractRNNCell):
         )
         w_ = tf.reduce_sum(tf.expand_dims(w_g, axis=1) * s_matrix, axis=2)      # eq (8)
         w_sharpen = tf.pow(w_, tf.expand_dims(gamma, axis=1))
-        w = w_sharpen / tf.reduce_sum(w_sharpen, axis=1, keep_dims=True)        # eq (9)
+        w = w_sharpen / tf.reduce_sum(w_sharpen, axis=1, keepdims=True)         # eq (9)
 
         return w
 
+    @staticmethod
+    def _expand(x, dim, N):
+        return tf.concat([tf.expand_dims(x, dim) for _ in range(N)], axis=dim)
+
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
         initial_state = {
-            'controller_state': self.controller.get_initial_state(batch_size, dtype),
-            'read_vector_list': [tf.zeros([batch_size, self.memory_vector_dim])
-                                 for _ in range(self.read_head_num)],
-            'w_list': [tf.zeros([batch_size, self.memory_size])
-                       for _ in range(self.read_head_num + self.write_head_num)],
-            'M': tf.zeros([batch_size, self.memory_size, self.memory_vector_dim])
+            'controller_state': [self._expand(tf.tanh(self.init_memory_state), dim=0, N=batch_size),
+                                 self._expand(tf.tanh(self.init_carry_state), dim=0, N=batch_size)],
+            'read_vector_list': [self._expand(tf.nn.tanh(self.init_r[i]), dim=0, N=batch_size)
+                                 for i in range(self.read_head_num)],
+            'w_list': [self._expand(tf.nn.softmax(self.init_w[i]), dim=0, N=batch_size)
+                       for i in range(self.read_head_num + self.write_head_num)],
+            'M': self._expand(tf.tanh(self.init_M), dim=0, N=batch_size)
         }
         return initial_state
