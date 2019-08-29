@@ -36,23 +36,23 @@ class NTMCell(tf.keras.layers.AbstractRNNCell):
         # From controller output to NTM output:
         self.controller_output_to_ntm_output = tf.keras.layers.Dense(units=self.output_dim, use_bias=True)
 
-        self.init_memory_state = self.add_variable(name='init_memory_state',
-                                                   shape=[self.rnn_size],
-                                                   initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
-        self.init_carry_state = self.add_variable(name='init_carry_state',
-                                                  shape=[self.rnn_size],
-                                                  initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
-        self.init_r = [self.add_variable(name='init_r_%d' % i,
-                                         shape=[self.memory_vector_dim],
-                                         initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_memory_state = self.add_weight(name='init_memory_state',
+                                                 shape=[self.rnn_size],
+                                                 initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_carry_state = self.add_weight(name='init_carry_state',
+                                                shape=[self.rnn_size],
+                                                initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_r = [self.add_weight(name='init_r_%d' % i,
+                                       shape=[self.memory_vector_dim],
+                                       initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
                        for i in range(self.read_head_num)]
-        self.init_w = [self.add_variable(name='init_w_%d' % i,
-                                         shape=[self.memory_size],
-                                         initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_w = [self.add_weight(name='init_w_%d' % i,
+                                       shape=[self.memory_size],
+                                       initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
                        for i in range(self.read_head_num + self.write_head_num)]
-        self.init_M = self.add_variable(name='init_M',
-                                        shape=[self.memory_size, self.memory_vector_dim],
-                                        initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
+        self.init_M = self.add_weight(name='init_M',
+                                      shape=[self.memory_size, self.memory_vector_dim],
+                                      initializer=tf.random_normal_initializer(mean=0.0, stddev=0.5))
 
     @property
     def state_size(self):
