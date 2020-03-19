@@ -2,7 +2,7 @@ import tensorflow as tf
 
 
 class MANNCell(tf.keras.layers.AbstractRNNCell):
-    def __init__(self, rnn_size, memory_size, memory_vector_dim, head_num, k_strategy='separate', **kwargs):
+    def __init__(self, rnn_size, memory_size, memory_vector_dim, head_num, gamma, k_strategy='separate', **kwargs):
         super().__init__(**kwargs)
         self.rnn_size = rnn_size
         self.memory_size = memory_size
